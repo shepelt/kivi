@@ -4,6 +4,9 @@ node_modules/
 # Build outputs
 dist/
 
+# Inbox (temporary staging area)
+inbox/
+
 # Environment variables
 .env
 .env.local

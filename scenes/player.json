@@ -1,0 +1,15 @@
+[
+  {
+    "id": "player_1",
+    "name": "player",
+    "script": "scripts/player.js",
+    "blocks": [
+      {
+        "type": "sphere",
+        "x": 5,
+        "y": 2,
+        "z": 5
+      }
+    ]
+  }
+]

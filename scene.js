@@ -3,6 +3,9 @@
 
 import { Grid } from './grid.js';
 import { createBlock } from './assets.js';
+import { VelocityPhysics, GravityPhysics } from './physics.js';
+import { Input } from './input.js';
+import { BoxCollider, checkCollision, checkGrounded, getGroundY } from './collision.js';
 import {
   createRenderer,
   createThreeScene,
@@ -16,6 +19,7 @@ import {
   fitPerspectiveCameraToGrid,
   updateCameraToFitGrid
 } from './renderer.js';
+import * as THREE from 'three';
 
 export class Scene {
   constructor(options = {}) {
@@ -85,9 +89,38 @@ export class Scene {
     // Setup resize handler
     setupResizeHandler(this.renderer, this.camera, options.camera?.frustumSize);
 
-    // Track all blocks
+    // Track all blocks and game objects
     this.blocks = [];
+    this.gameObjects = new Map(); // Map of id -> gameObject data
     this.metadata = {};
+
+    // Calculate grid bounds for collision boundaries (if enabled)
+    const gridOptions = options.grid || {};
+    this.gridBounds = gridOptions.boundary !== false ? this.calculateGridBounds() : null;
+
+    // Expose physics utilities and input for scripts
+    this.physics = {
+      VelocityPhysics,
+      GravityPhysics
+    };
+    this.input = Input; // Global input singleton
+
+    // Expose collision utilities for scripts
+    this.collision = {
+      BoxCollider,
+      checkCollision,
+      checkGrounded,
+      getGroundY
+    };
+
+    // Helper to create physics
+    this.createVelocityPhysics = (options = {}) => {
+      return new VelocityPhysics(options);
+    };
+
+    // Raycaster for mouse picking
+    this.raycaster = new THREE.Raycaster();
+    this.mouseVector = new THREE.Vector2();
 
     // Start animation loop
     const animate = createAnimationLoop(
@@ -101,7 +134,85 @@ export class Scene {
 
   // Update function called every frame
   update(threeScene) {
-    // Rotate objects marked as rotatable
+    // Calculate delta time (in seconds)
+    const now = performance.now();
+    const delta = this.lastUpdateTime ? (now - this.lastUpdateTime) / 1000 : 0;
+    this.lastUpdateTime = now;
+
+    // Call onUpdate for all game object scripts
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (gameObject.scriptInstance && gameObject.scriptInstance.onUpdate) {
+        gameObject.scriptInstance.onUpdate(gameObject, this, delta);
+      }
+
+      // Automatically update physics if game object has physics component
+      if (gameObject.physics && gameObject.position) {
+        // Don't apply gravity if grounded (checked in onUpdate)
+        const applyGravity = !gameObject.isGrounded;
+        gameObject.physics.updatePosition(gameObject.position, delta, applyGravity);
+      }
+
+      // Automatically handle collision if game object has collider component
+      if (gameObject.collider && gameObject.position) {
+        // Check if grounded BEFORE collision resolution (for excludeGround logic)
+        gameObject.isGrounded = gameObject.collider.checkGrounded(this, gameObject.position);
+
+        // Store last valid position
+        if (!gameObject.lastValidPosition) {
+          gameObject.lastValidPosition = { ...gameObject.position };
+        }
+
+        // Resolve collision (only exclude ground when grounded)
+        const excludeGround = gameObject.isGrounded || false;
+        const oldPos = { ...gameObject.position };
+        const hadCollision = gameObject.collider.resolve(this, gameObject.position, gameObject.lastValidPosition, excludeGround);
+
+        // Stop velocity on blocked axes
+        if (hadCollision && gameObject.physics) {
+          if (gameObject.position.x !== oldPos.x) gameObject.physics.velocity.x = 0;
+          if (gameObject.position.y !== oldPos.y) gameObject.physics.velocity.y = 0;
+          if (gameObject.position.z !== oldPos.z) gameObject.physics.velocity.z = 0;
+        }
+
+        // Update last valid position
+        gameObject.lastValidPosition = { ...gameObject.position };
+
+        // Ground snapping: if grounded and falling, snap to ground surface
+        // Only snap if very close (within snap threshold) to prevent jarring instant stops
+        if (gameObject.physics && gameObject.physics.velocity.y <= 0) {
+          const grounded = gameObject.collider.checkGrounded(this, gameObject.position);
+          if (grounded) {
+            const groundY = gameObject.collider.getGroundY(this, gameObject.position);
+            const targetY = groundY + gameObject.collider.size.y / 2;
+            const distance = Math.abs(gameObject.position.y - targetY);
+
+            // Only snap if within snap threshold (0.1 units)
+            if (distance < 0.1) {
+              gameObject.position.y = targetY;
+              gameObject.physics.stopVertical();
+              gameObject.isGrounded = true;
+            }
+          }
+        }
+      }
+
+      // Call onLateUpdate after physics and collision
+      if (gameObject.scriptInstance && gameObject.scriptInstance.onLateUpdate) {
+        gameObject.scriptInstance.onLateUpdate(gameObject, this, delta);
+      }
+
+      // Sync block positions with game object position (only if game object has moved)
+      // Static game objects (no physics/script) don't need syncing
+      if (gameObject.physics && gameObject.blocks && gameObject.blocks.length > 0) {
+        gameObject.blocks.forEach(block => {
+          block.position.x = gameObject.position.x;
+          block.position.y = gameObject.position.y;
+          block.position.z = gameObject.position.z;
+        });
+      }
+    }
+
+    // Rotate objects marked as rotatable (legacy)
     threeScene.traverse((object) => {
       if (object.isMesh && object.userData.rotatable) {
         object.rotation.y += 0.02;
@@ -117,7 +228,7 @@ export class Scene {
   }
 
   // Load a scene from JSON definition
-  load(sceneData) {
+  async load(sceneData) {
     // Clear existing scene
     this.clear();
 
@@ -129,15 +240,132 @@ export class Scene {
       created: sceneData.created || new Date().toISOString()
     };
 
-    // Load blocks
-    if (sceneData.blocks && Array.isArray(sceneData.blocks)) {
+    // Load game objects - support inline array, external file, or mixed array with file references
+    let gameObjects = [];
+
+    if (Array.isArray(sceneData.gameObjects)) {
+      // Process array - load any string references
+      for (const item of sceneData.gameObjects) {
+        if (typeof item === 'string') {
+          // Item is a file path, load it
+          const response = await fetch(item);
+          const externalObjects = await response.json();
+          gameObjects.push(...externalObjects);
+        } else {
+          // Item is an inline game object
+          gameObjects.push(item);
+        }
+      }
+    } else if (typeof sceneData.gameObjects === 'string') {
+      // gameObjects is a single file path, load it
+      const response = await fetch(sceneData.gameObjects);
+      gameObjects = await response.json();
+    } else if (sceneData.gameObjects) {
+      // Shouldn't happen, but handle it
+      gameObjects = [sceneData.gameObjects];
+    }
+
+    // Load blocks - support both old format (flat blocks array) and new format (gameObjects array)
+    if (gameObjects && Array.isArray(gameObjects)) {
+      // New format: iterate through game objects
+      gameObjects.forEach(gameObject => {
+        // Validate ID
+        if (!gameObject.id) {
+          console.warn('Game object missing ID, skipping:', gameObject);
+          return;
+        }
+
+        if (this.gameObjects.has(gameObject.id)) {
+          console.warn(`Duplicate game object ID: ${gameObject.id}, skipping`);
+          return;
+        }
+
+        // Store game object metadata
+        this.gameObjects.set(gameObject.id, {
+          id: gameObject.id,
+          name: gameObject.name || 'unnamed',
+          script: gameObject.script || null,
+          scriptInstance: null, // Will be loaded asynchronously
+          blocks: [],
+          position: null, // Will be set from first block
+          physics: null // Optional physics component
+        });
+
+        // Load blocks for this game object
+        if (gameObject.blocks && Array.isArray(gameObject.blocks)) {
+          const gameObjectData = this.gameObjects.get(gameObject.id);
+
+          gameObject.blocks.forEach(blockData => {
+            // Dynamic objects (with scripts) shouldn't be tracked in grid for collision
+            const trackInGrid = !gameObject.script;
+            const block = this.addBlock(blockData, trackInGrid);
+            if (block) {
+              // Link block to game object
+              block.userData.gameObjectId = gameObject.id;
+              gameObjectData.blocks.push(block);
+
+              // Set initial position from first block
+              if (!gameObjectData.position) {
+                gameObjectData.position = {
+                  x: block.position.x,
+                  y: block.position.y,
+                  z: block.position.z
+                };
+              }
+            }
+          });
+        }
+      });
+    } else if (sceneData.blocks && Array.isArray(sceneData.blocks)) {
+      // Old format: flat blocks array (for backwards compatibility)
       sceneData.blocks.forEach(blockData => {
         this.addBlock(blockData);
       });
     }
 
     console.log(`Scene loaded: ${this.metadata.name} (${this.blocks.length} blocks)`);
+
+    // Load scripts for game objects
+    this.loadScripts();
+
     return this;
+  }
+
+  // Load scripts for all game objects
+  async loadScripts() {
+    const scriptPromises = [];
+
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (gameObject.script) {
+        const promise = this.loadScript(id, gameObject.script);
+        scriptPromises.push(promise);
+      }
+    }
+
+    await Promise.all(scriptPromises);
+    console.log(`Loaded ${scriptPromises.length} script(s)`);
+  }
+
+  // Load a single script for a game object
+  async loadScript(gameObjectId, scriptPath) {
+    try {
+      // Dynamic import - Vite will handle module resolution
+      const scriptModule = await import(/* @vite-ignore */ `/${scriptPath}`);
+      const scriptInstance = scriptModule.default;
+
+      // Store the script instance
+      const gameObject = this.gameObjects.get(gameObjectId);
+      gameObject.scriptInstance = scriptInstance;
+
+      // Call onInit if it exists
+      if (scriptInstance.onInit) {
+        scriptInstance.onInit(gameObject, this);
+      }
+
+      console.log(`Script loaded for ${gameObjectId}: ${scriptPath}`);
+    } catch (error) {
+      console.error(`Failed to load script for ${gameObjectId}: ${scriptPath}`, error);
+    }
   }
 
   // Load scene from URL
@@ -145,7 +373,7 @@ export class Scene {
     try {
       const response = await fetch(url);
       const sceneData = await response.json();
-      this.load(sceneData);
+      await this.load(sceneData);
       return this;
     } catch (error) {
       console.error('Error loading scene from URL:', error);
@@ -171,7 +399,7 @@ export class Scene {
       const scene = new Scene(config);
 
       // Load blocks
-      scene.load(sceneData);
+      await scene.load(sceneData);
 
       return scene;
     } catch (error) {
@@ -181,7 +409,7 @@ export class Scene {
   }
 
   // Add a single block to the scene
-  addBlock(blockData) {
+  addBlock(blockData, trackInGrid = true) {
     const {
       type,
       x,
@@ -199,7 +427,7 @@ export class Scene {
     }
 
     // Create block options
-    const options = {};
+    const options = { trackInGrid };
     if (color !== undefined) options.color = color;
     if (transparent !== undefined) options.transparent = transparent;
     if (opacity !== undefined) options.opacity = opacity;
@@ -221,6 +449,100 @@ export class Scene {
     return block;
   }
 
+  // Add a game object to the scene at runtime
+  async addGameObject(gameObjectData) {
+    // Validate ID
+    if (!gameObjectData.id) {
+      console.warn('Game object missing ID, cannot add:', gameObjectData);
+      return null;
+    }
+
+    if (this.gameObjects.has(gameObjectData.id)) {
+      console.warn(`Duplicate game object ID: ${gameObjectData.id}, cannot add`);
+      return null;
+    }
+
+    // Create game object entry
+    const gameObject = {
+      id: gameObjectData.id,
+      name: gameObjectData.name || 'unnamed',
+      script: gameObjectData.script || null,
+      scriptInstance: null,
+      blocks: [],
+      position: null,
+      physics: null
+    };
+
+    this.gameObjects.set(gameObjectData.id, gameObject);
+
+    // Add blocks if provided
+    if (gameObjectData.blocks && Array.isArray(gameObjectData.blocks)) {
+      gameObjectData.blocks.forEach(blockData => {
+        // Dynamic objects (with scripts) shouldn't be tracked in grid for collision
+        const trackInGrid = !gameObjectData.script;
+        const block = this.addBlock(blockData, trackInGrid);
+        if (block) {
+          // Link block to game object
+          block.userData.gameObjectId = gameObjectData.id;
+          gameObject.blocks.push(block);
+
+          // Set initial position from first block
+          if (!gameObject.position) {
+            gameObject.position = {
+              x: block.position.x,
+              y: block.position.y,
+              z: block.position.z
+            };
+          }
+        }
+      });
+    }
+
+    // Load script if provided
+    if (gameObjectData.script) {
+      await this.loadScript(gameObjectData.id, gameObjectData.script);
+    }
+
+    console.log(`Added game object: ${gameObjectData.id}`);
+    return gameObject;
+  }
+
+  // Remove a game object from the scene
+  removeGameObject(gameObjectId) {
+    const gameObject = this.gameObjects.get(gameObjectId);
+
+    if (!gameObject) {
+      console.warn(`Game object not found: ${gameObjectId}`);
+      return false;
+    }
+
+    // Remove all blocks from Three.js scene and grid
+    if (gameObject.blocks && gameObject.blocks.length > 0) {
+      gameObject.blocks.forEach(block => {
+        // Remove from Three.js scene
+        this.threeScene.remove(block);
+
+        // Remove from blocks array
+        const index = this.blocks.indexOf(block);
+        if (index > -1) {
+          this.blocks.splice(index, 1);
+        }
+
+        // Remove from grid if it was tracked
+        const gridPos = block.userData.gridPosition;
+        if (gridPos) {
+          this.grid.removeBlock(gridPos.gridX, gridPos.gridY, gridPos.gridZ);
+        }
+      });
+    }
+
+    // Remove from game objects map
+    this.gameObjects.delete(gameObjectId);
+
+    console.log(`Removed game object: ${gameObjectId}`);
+    return true;
+  }
+
   // Clear all blocks from scene
   clear() {
     // Remove all blocks from Three.js scene
@@ -229,6 +551,7 @@ export class Scene {
     });
 
     this.blocks = [];
+    this.gameObjects.clear();
     this.metadata = {};
     this.grid.cells.clear();
   }
@@ -262,10 +585,43 @@ export class Scene {
     };
   }
 
+  // Get game object by ID
+  getGameObject(id) {
+    return this.gameObjects.get(id);
+  }
+
+  // Get all game object IDs
+  getGameObjectIds() {
+    return Array.from(this.gameObjects.keys());
+  }
+
+  // Calculate grid bounds in world coordinates
+  calculateGridBounds() {
+    // Grid coordinates 0 to size-1 map to world coordinates
+    // With centerOffset, grid 0 -> world -centerOffset
+    // grid size-1 -> world (size-1 - centerOffset)
+    // Add 0.5 to account for block centers (blocks span -0.5 to +0.5 from center)
+    const min = -this.grid.centerOffset - 0.5;
+    const max = this.grid.size - this.grid.centerOffset - 0.5;
+
+    return {
+      minX: min,
+      maxX: max,
+      minZ: min,
+      maxZ: max
+    };
+  }
+
+  // Get grid bounds in world coordinates (alias for backwards compatibility)
+  getGridBounds() {
+    return this.gridBounds;
+  }
+
   // Get scene statistics
   getStats() {
     return {
       blockCount: this.blocks.length,
+      gameObjectCount: this.gameObjects.size,
       blockTypes: [...new Set(this.blocks.map(b => b.userData.blockType))],
       bounds: this.calculateBounds()
     };
@@ -287,6 +643,54 @@ export class Scene {
       minZ: Math.min(...positions.map(p => p.gridZ)),
       maxZ: Math.max(...positions.map(p => p.gridZ))
     };
+  }
+
+  // Raycast from screen coordinates to find clicked block/object
+  // Returns { block, gameObject, point, face } or null if nothing hit
+  raycastFromPointer(screenX, screenY) {
+    // Convert screen coordinates to normalized device coordinates (-1 to +1)
+    const canvas = this.renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    this.mouseVector.x = ((screenX - rect.left) / rect.width) * 2 - 1;
+    this.mouseVector.y = -((screenY - rect.top) / rect.height) * 2 + 1;
+
+    // Cast ray from camera through mouse position
+    this.raycaster.setFromCamera(this.mouseVector, this.camera);
+
+    // Check intersections with all blocks
+    const intersects = this.raycaster.intersectObjects(this.blocks, false);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const block = hit.object;
+
+      // Get game object if this block belongs to one
+      const gameObjectId = block.userData.gameObjectId;
+      const gameObject = gameObjectId ? this.gameObjects.get(gameObjectId) : null;
+
+      return {
+        block,
+        gameObject,
+        point: hit.point,
+        face: hit.face,
+        distance: hit.distance,
+        gridPosition: block.userData.gridPosition
+      };
+    }
+
+    return null;
+  }
+
+  // Helper: Check if there was a click and return what was clicked
+  // Call in onUpdate to handle clicks
+  checkClick() {
+    if (this.input.wasClicked()) {
+      const pointer = this.input.getPointerPosition();
+      const hit = this.raycastFromPointer(pointer.x, pointer.y);
+      this.input.clearClick();
+      return hit;
+    }
+    return null;
   }
 }
 

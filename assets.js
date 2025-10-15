@@ -30,7 +30,10 @@ export const BLOCK_TYPES = {
 
   // Special blocks
   GLASS: { name: 'glass', color: 0x88ccff, transparent: true, opacity: 0.5 },
-  WATER: { name: 'water', color: 0x4488ff, transparent: true, opacity: 0.7 }
+  WATER: { name: 'water', color: 0x4488ff, transparent: true, opacity: 0.7 },
+
+  // Primitives
+  SPHERE: { name: 'sphere', color: 0xeeeeee, geometry: 'sphere' }
 };
 
 // Create a block mesh (1x1x1 cube)
@@ -56,13 +59,24 @@ export function createBlock(blockType, options = {}) {
   const transparent = options.transparent !== undefined ? options.transparent : blockProps.transparent;
   const opacity = options.opacity || blockProps.opacity || 1.0;
 
-  // Create 1x1x1 cube geometry
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  // Create geometry based on type
+  let geometry;
+  let useFlatShading = true;
+
+  if (blockProps.geometry === 'sphere') {
+    // Sphere with radius 0.5 to fit in 1x1x1 space
+    // Use more segments for smoother appearance
+    geometry = new THREE.SphereGeometry(0.5, 32, 32);
+    useFlatShading = false; // Smooth shading for spheres
+  } else {
+    // Default: 1x1x1 cube
+    geometry = new THREE.BoxGeometry(1, 1, 1);
+  }
 
   // Create material
   const material = new THREE.MeshStandardMaterial({
     color: color,
-    flatShading: true,
+    flatShading: useFlatShading,
     transparent: transparent || false,
     opacity: opacity
   });

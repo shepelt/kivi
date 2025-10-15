@@ -1,0 +1,19 @@
+{
+  "name": "kivi",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "AI-first game sandbox engine for creating small, isometric, low-poly 3D games",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.3"
+  },
+  "author": "",
+  "license": "ISC"
+}

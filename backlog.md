@@ -6,6 +6,7 @@
 ## Done (v0.0)
 
 - TASK-1: basic rendering, scene, and asset system
+- TASK-2: physics and scripting system
 
 ## In Progress
 

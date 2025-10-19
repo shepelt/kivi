@@ -229,8 +229,57 @@ export default {
 2. **onUpdate(gameObject, scene, delta)** - Called every frame before physics
 3. *[Automatic physics update]*
 4. *[Automatic collision resolution]*
-5. *[Automatic grounding detection]*
-6. **onLateUpdate(gameObject, scene, delta)** - Called every frame after physics
+5. **onCollisionEnter(gameObject, other, scene)** - Called when collision starts with another game object
+6. **onCollisionStay(gameObject, other, scene)** - Called every frame while colliding with another game object
+7. **onCollisionExit(gameObject, other, scene)** - Called when collision ends with another game object
+8. *[Automatic grounding detection]*
+9. **onLateUpdate(gameObject, scene, delta)** - Called every frame after physics
+
+#### Collision Events
+
+Game objects can respond to collisions with other game objects using three lifecycle hooks:
+
+**onCollisionEnter(gameObject, other, scene)** - Triggered once when collision starts:
+```javascript
+onCollisionEnter(gameObject, other, scene) {
+  // Check what we collided with
+  if (other.name === 'paddle') {
+    // Reverse velocity
+    gameObject.velocity.z *= -1;
+    console.log('Ball hit paddle!');
+  }
+
+  // Check by tag
+  if (other.tag === 'breakable') {
+    scene.destroy(other.id);  // Destroy the brick
+  }
+}
+```
+
+**onCollisionStay(gameObject, other, scene)** - Triggered every frame while collision continues:
+```javascript
+onCollisionStay(gameObject, other, scene) {
+  // Continuous collision logic (e.g., damage over time)
+  if (other.tag === 'lava') {
+    gameObject.health -= 10 * delta;
+  }
+}
+```
+
+**onCollisionExit(gameObject, other, scene)** - Triggered once when collision ends:
+```javascript
+onCollisionExit(gameObject, other, scene) {
+  // Handle separation
+  if (other.tag === 'platform') {
+    console.log('Left the platform');
+  }
+}
+```
+
+**Collision Detection:**
+- Collisions are automatically detected between game objects that have `bounds`, `collider.size`, or `size` properties
+- Access collision partner properties: `other.id`, `other.name`, `other.tag`, `other.position`, `other.bounds`
+- See `scripts/ball.js` for a complete collision handling example
 
 #### Available Components
 

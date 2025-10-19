@@ -5,7 +5,7 @@ import { Grid } from './grid.js';
 import { createBlock } from './assets.js';
 import { VelocityPhysics, GravityPhysics } from './physics.js';
 import { Input } from './input.js';
-import { BoxCollider, checkCollision, checkGrounded, getGroundY } from './collision.js';
+import { BoxCollider, checkCollision, checkGrounded, getGroundY, checkGameObjectCollision } from './collision.js';
 import {
   createRenderer,
   createThreeScene,
@@ -96,6 +96,9 @@ export class Scene {
     this.blocks = [];
     this.gameObjects = new Map(); // Map of id -> gameObject data
     this.metadata = {};
+
+    // Track active collisions for collision events (Set of "id1:id2" strings)
+    this.activeCollisions = new Set();
 
     // Calculate grid bounds for collision boundaries (if enabled)
     const gridOptions = options.grid || {};
@@ -203,7 +206,13 @@ export class Scene {
       if (gameObject.scriptInstance && gameObject.scriptInstance.onLateUpdate) {
         gameObject.scriptInstance.onLateUpdate(gameObject, this, delta);
       }
+    }
 
+    // Process collision events (after all objects have updated)
+    this.processCollisionEvents();
+
+    // Sync block positions after all updates
+    for (const [id, gameObject] of this.gameObjects.entries()) {
       // Sync block positions with game object position (only if game object has moved)
       // Static game objects (no physics/script) don't need syncing
       if ((gameObject.physics || gameObject.script) && gameObject.blocks && gameObject.blocks.length > 0) {
@@ -223,6 +232,75 @@ export class Scene {
         object.rotation.y += 0.02;
       }
     });
+  }
+
+  // Process collision events between game objects
+  processCollisionEvents() {
+    const currentCollisions = new Set();
+    const gameObjectsArray = Array.from(this.gameObjects.values());
+
+    // Check all pairs of game objects
+    for (let i = 0; i < gameObjectsArray.length; i++) {
+      const obj1 = gameObjectsArray[i];
+
+      // Skip if no script or no collision detection needed
+      if (!obj1.scriptInstance || !obj1.position) continue;
+
+      for (let j = i + 1; j < gameObjectsArray.length; j++) {
+        const obj2 = gameObjectsArray[j];
+
+        // Skip if no position
+        if (!obj2.position) continue;
+
+        // Check collision
+        const collision = checkGameObjectCollision(obj1, obj2);
+
+        if (collision.colliding) {
+          // Create collision pair key (sorted to ensure consistency)
+          const key = obj1.id < obj2.id ? `${obj1.id}:${obj2.id}` : `${obj2.id}:${obj1.id}`;
+          currentCollisions.add(key);
+
+          // Check if this is a new collision
+          if (!this.activeCollisions.has(key)) {
+            // New collision - call onCollisionEnter
+            if (obj1.scriptInstance && obj1.scriptInstance.onCollisionEnter) {
+              obj1.scriptInstance.onCollisionEnter(obj1, obj2, this);
+            }
+            if (obj2.scriptInstance && obj2.scriptInstance.onCollisionEnter) {
+              obj2.scriptInstance.onCollisionEnter(obj2, obj1, this);
+            }
+          } else {
+            // Ongoing collision - call onCollisionStay if defined
+            if (obj1.scriptInstance && obj1.scriptInstance.onCollisionStay) {
+              obj1.scriptInstance.onCollisionStay(obj1, obj2, this);
+            }
+            if (obj2.scriptInstance && obj2.scriptInstance.onCollisionStay) {
+              obj2.scriptInstance.onCollisionStay(obj2, obj1, this);
+            }
+          }
+        }
+      }
+    }
+
+    // Check for collisions that ended
+    for (const key of this.activeCollisions) {
+      if (!currentCollisions.has(key)) {
+        // Collision ended - call onCollisionExit
+        const [id1, id2] = key.split(':');
+        const obj1 = this.gameObjects.get(id1);
+        const obj2 = this.gameObjects.get(id2);
+
+        if (obj1 && obj1.scriptInstance && obj1.scriptInstance.onCollisionExit) {
+          obj1.scriptInstance.onCollisionExit(obj1, obj2, this);
+        }
+        if (obj2 && obj2.scriptInstance && obj2.scriptInstance.onCollisionExit) {
+          obj2.scriptInstance.onCollisionExit(obj2, obj1, this);
+        }
+      }
+    }
+
+    // Update active collisions
+    this.activeCollisions = currentCollisions;
   }
 
   // Add block to Three.js scene (wrapper for grid)
@@ -727,6 +805,7 @@ export class Scene {
     this.gameObjects.clear();
     this.metadata = {};
     this.grid.cells.clear();
+    this.activeCollisions.clear();
 
     console.log('Scene cleared');
   }

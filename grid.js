@@ -31,9 +31,13 @@ export class Grid {
 
   // Check if grid position is within bounds
   isInBounds(gridX, gridY, gridZ) {
-    return gridX >= 0 && gridX < this.size &&
+    const result = gridX >= 0 && gridX < this.size &&
            gridY >= 0 && // No upper limit on Y for now
            gridZ >= 0 && gridZ < this.size;
+    if (!result) {
+      console.log(`Bounds check: (${gridX}, ${gridY}, ${gridZ}) vs size ${this.size}: gridX=${gridX >= 0 && gridX < this.size}, gridZ=${gridZ >= 0 && gridZ < this.size}`);
+    }
+    return result;
   }
 
   // Get cell key for storage

@@ -23,6 +23,9 @@ import * as THREE from 'three';
 
 export class Scene {
   constructor(options = {}) {
+    // Track if this is the initial load (don't update camera on initial load)
+    this.isInitialLoad = true;
+
     // Initialize grid system first (needed for camera fitting)
     this.grid = new Grid(options.grid);
 
@@ -123,12 +126,12 @@ export class Scene {
     this.mouseVector = new THREE.Vector2();
 
     // Start animation loop
-    const animate = createAnimationLoop(
-      this.renderer,
-      this.threeScene,
-      this.camera,
-      (scene) => this.update(scene)
-    );
+    // Pass 'this' instead of camera so we can access the current camera dynamically
+    const animate = () => {
+      requestAnimationFrame(animate);
+      this.update(this.threeScene);
+      this.renderer.render(this.threeScene, this.camera);
+    };
     animate();
   }
 
@@ -203,11 +206,13 @@ export class Scene {
 
       // Sync block positions with game object position (only if game object has moved)
       // Static game objects (no physics/script) don't need syncing
-      if (gameObject.physics && gameObject.blocks && gameObject.blocks.length > 0) {
+      if ((gameObject.physics || gameObject.script) && gameObject.blocks && gameObject.blocks.length > 0) {
         gameObject.blocks.forEach(block => {
-          block.position.x = gameObject.position.x;
-          block.position.y = gameObject.position.y;
-          block.position.z = gameObject.position.z;
+          // Apply stored offset to preserve multi-block structure
+          const offset = block.userData.offset || { x: 0, y: 0, z: 0 };
+          block.position.x = gameObject.position.x + offset.x;
+          block.position.y = gameObject.position.y + offset.y;
+          block.position.z = gameObject.position.z + offset.z;
         });
       }
     }
@@ -231,6 +236,93 @@ export class Scene {
   async load(sceneData) {
     // Clear existing scene
     this.clear();
+
+    // Update grid configuration if provided
+    if (sceneData.config && sceneData.config.grid) {
+      this.grid.size = sceneData.config.grid.size || this.grid.size;
+      this.grid.cellSize = sceneData.config.grid.cellSize || this.grid.cellSize;
+      this.grid.centerOffset = Math.floor(this.grid.size / 2);
+
+      // Recalculate grid bounds
+      const gridOptions = sceneData.config.grid;
+      this.gridBounds = gridOptions.boundary !== false ? this.calculateGridBounds() : null;
+
+      // Update camera to fit new grid size (only when switching scenes, not on initial load)
+      if (!this.isInitialLoad && sceneData.config.fitToGrid !== false) {
+        const cameraMode = sceneData.config.cameraMode || 'isometric';
+        const newIsPerspective = ['3/4', '34', 'strategy'].includes(cameraMode);
+        const currentIsPerspective = this.camera.isPerspectiveCamera;
+        const cameraPadding = sceneData.config.cameraPadding || 0.1;
+
+        // If camera type changed (perspective <-> orthographic), recreate camera
+        if (newIsPerspective !== currentIsPerspective) {
+          console.log(`Camera type changed, recreating camera as ${cameraMode}`);
+
+          // Calculate camera settings
+          const cameraSettings = newIsPerspective
+            ? fitPerspectiveCameraToGrid(this.grid.size, this.grid.cellSize, cameraPadding)
+            : fitCameraToGrid(this.grid.size, this.grid.cellSize, cameraPadding);
+
+          // Create new camera
+          this.camera = createCamera(cameraMode, {
+            frustumSize: cameraSettings.frustumSize,
+            distance: cameraSettings.distance,
+            height: cameraSettings.height,
+            fov: cameraSettings.fov
+          });
+
+          this.camera.lookAt(-0.5, 0, -0.5);
+        } else {
+          // Same camera type, just update settings
+          if (newIsPerspective) {
+            const cameraSettings = fitPerspectiveCameraToGrid(
+              this.grid.size,
+              this.grid.cellSize,
+              cameraPadding
+            );
+            // Update perspective camera (3/4 view positions from front)
+            this.camera.position.set(
+              -0.5,
+              cameraSettings.height,
+              cameraSettings.distance - 0.5
+            );
+            this.camera.lookAt(-0.5, 0, -0.5);
+          } else {
+            const cameraSettings = fitCameraToGrid(
+              this.grid.size,
+              this.grid.cellSize,
+              cameraPadding
+            );
+            // Update orthographic camera frustum
+            const aspect = window.innerWidth / window.innerHeight;
+            const frustumSize = cameraSettings.frustumSize;
+            this.camera.left = -frustumSize * aspect / 2;
+            this.camera.right = frustumSize * aspect / 2;
+            this.camera.top = frustumSize / 2;
+            this.camera.bottom = -frustumSize / 2;
+            this.camera.updateProjectionMatrix();
+
+            // Update camera position for isometric view
+            const distance = cameraSettings.distance;
+            this.camera.position.set(distance, distance, distance);
+            this.camera.lookAt(-0.5, 0, -0.5);
+          }
+        }
+      }
+
+      // Update grid helper if showGrid is specified
+      if (sceneData.config.showGrid !== undefined) {
+        // Remove old grid helper
+        const oldGridHelper = this.threeScene.children.find(child => child.type === 'GridHelper');
+        if (oldGridHelper) {
+          this.threeScene.remove(oldGridHelper);
+        }
+        // Add new grid helper if needed
+        if (sceneData.config.showGrid) {
+          addGridHelper(this.threeScene, sceneData.config.grid);
+        }
+      }
+    }
 
     // Store metadata
     this.metadata = {
@@ -301,7 +393,7 @@ export class Scene {
         if (gameObject.blocks && Array.isArray(gameObject.blocks)) {
           const gameObjectData = this.gameObjects.get(gameObject.id);
 
-          gameObject.blocks.forEach(blockData => {
+          gameObject.blocks.forEach((blockData, index) => {
             // Dynamic objects (with scripts) shouldn't be tracked in grid for collision
             const trackInGrid = !gameObject.script;
             const block = this.addBlock(blockData, trackInGrid);
@@ -310,14 +402,22 @@ export class Scene {
               block.userData.gameObjectId = gameObject.id;
               gameObjectData.blocks.push(block);
 
-              // Set initial position from first block
+              // Set initial position from first block (becomes the "anchor" position)
               if (!gameObjectData.position) {
                 gameObjectData.position = {
                   x: block.position.x,
                   y: block.position.y,
                   z: block.position.z
                 };
+                console.log(`Set position for ${gameObject.id}:`, gameObjectData.position);
               }
+
+              // Store offset from anchor position for multi-block game objects
+              block.userData.offset = {
+                x: block.position.x - gameObjectData.position.x,
+                y: block.position.y - gameObjectData.position.y,
+                z: block.position.z - gameObjectData.position.z
+              };
             }
           });
         }
@@ -331,8 +431,11 @@ export class Scene {
 
     console.log(`Scene loaded: ${this.metadata.name} (${this.blocks.length} blocks)`);
 
-    // Load scripts for game objects
-    this.loadScripts();
+    // Load scripts for game objects (await to ensure scripts load before update loop runs)
+    await this.loadScripts();
+
+    // Mark that initial load is complete
+    this.isInitialLoad = false;
 
     return this;
   }
@@ -514,6 +617,7 @@ export class Scene {
               y: block.position.y,
               z: block.position.z
             };
+            console.log(`Set position for ${gameObjectData.id}:`, gameObject.position);
           }
         }
       });

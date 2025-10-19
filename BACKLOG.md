@@ -12,3 +12,5 @@
 ## In Progress
 
 ## Next Up
+
+- TASK-4: debug server for LLM-friendly inspection (console logs, scene state, game objects)

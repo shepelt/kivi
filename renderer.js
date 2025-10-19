@@ -127,7 +127,8 @@ export function fitCameraToGrid(gridSize, cellSize = 1, padding = 0.1) {
 
   // Camera distance: for isometric view, position at 45° angle
   // Distance should be far enough to see everything clearly
-  const distance = worldSize * 0.7;
+  // Use 1.0 instead of 0.7 for better zoom level
+  const distance = worldSize * 1.0;
 
   // Grid center: for a grid of size N with cellSize 1
   // Grid coordinates 0 to N-1 map to world coordinates -floor(N/2) to ceil(N/2)-1

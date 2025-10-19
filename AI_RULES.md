@@ -3,6 +3,8 @@
 ## Project Overview
 KIVI is an AI-first game sandbox engine for creating small, isometric, low-poly 3D games.
 
+**See also**: README.md for project documentation and getting started guide
+
 **Concept**: "AI-first game sandbox engine with small, isometric view optimized for low-poly"
 
 **Name Origin**: KIVI (Finnish: "stone") - representing the fundamental building blocks

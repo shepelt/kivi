@@ -280,15 +280,21 @@ export class Scene {
           return;
         }
 
-        // Store game object metadata
-        this.gameObjects.set(gameObject.id, {
-          id: gameObject.id,
+        // Store game object metadata - preserve all custom fields
+        const gameObjectId = gameObject.id;
+        this.gameObjects.set(gameObjectId, {
+          ...gameObject, // Copy all custom fields (tags, health, etc.)
+          id: gameObjectId,
           name: gameObject.name || 'unnamed',
           script: gameObject.script || null,
-          scriptInstance: null, // Will be loaded asynchronously
-          blocks: [],
-          position: null, // Will be set from first block
-          physics: null // Optional physics component
+          scriptInstance: null, // Internal: Will be loaded asynchronously
+          blocks: [], // Internal: Three.js meshes
+          position: null, // Internal: Will be set from first block
+          physics: null, // Internal: Optional physics component
+          // Method: destroy this game object (Unity-style)
+          destroy: () => {
+            this.destroy(gameObjectId);
+          }
         });
 
         // Load blocks for this game object
@@ -381,6 +387,15 @@ export class Scene {
     }
   }
 
+  // Switch to a new scene (unload current, load new)
+  async switchScene(url) {
+    console.log(`Switching scene to: ${url}`);
+    this.clear(); // Unload current scene
+    await this.loadFromURL(url); // Load new scene
+    console.log(`Scene switched to: ${url}`);
+    return this;
+  }
+
   // Static method: Create a new Scene from a scene file URL
   // This will use the config from the scene file itself
   static async fromURL(url) {
@@ -449,8 +464,9 @@ export class Scene {
     return block;
   }
 
-  // Add a game object to the scene at runtime
-  async addGameObject(gameObjectData) {
+  // Instantiate a game object from a definition (Unity-style)
+  // Creates a new game object instance from JSON definition
+  async instantiate(gameObjectData) {
     // Validate ID
     if (!gameObjectData.id) {
       console.warn('Game object missing ID, cannot add:', gameObjectData);
@@ -462,15 +478,20 @@ export class Scene {
       return null;
     }
 
-    // Create game object entry
+    // Create game object entry - preserve all custom fields from input
     const gameObject = {
+      ...gameObjectData, // Copy all custom fields (tags, health, etc.)
       id: gameObjectData.id,
       name: gameObjectData.name || 'unnamed',
       script: gameObjectData.script || null,
-      scriptInstance: null,
-      blocks: [],
-      position: null,
-      physics: null
+      scriptInstance: null, // Internal: loaded script
+      blocks: [], // Internal: Three.js meshes
+      position: null, // Internal: world position
+      physics: null, // Internal: physics component
+      // Method: destroy this game object (Unity-style)
+      destroy: () => {
+        this.destroy(gameObjectData.id);
+      }
     };
 
     this.gameObjects.set(gameObjectData.id, gameObject);
@@ -503,12 +524,12 @@ export class Scene {
       await this.loadScript(gameObjectData.id, gameObjectData.script);
     }
 
-    console.log(`Added game object: ${gameObjectData.id}`);
+    console.log(`Instantiated game object: ${gameObjectData.id}`);
     return gameObject;
   }
 
-  // Remove a game object from the scene
-  removeGameObject(gameObjectId) {
+  // Destroy a game object instance and remove from scene (Unity-style)
+  destroy(gameObjectId) {
     const gameObject = this.gameObjects.get(gameObjectId);
 
     if (!gameObject) {
@@ -531,7 +552,7 @@ export class Scene {
         // Remove from grid if it was tracked
         const gridPos = block.userData.gridPosition;
         if (gridPos) {
-          this.grid.removeBlock(gridPos.gridX, gridPos.gridY, gridPos.gridZ);
+          this.grid.clearCell(gridPos.gridX, gridPos.gridY, gridPos.gridZ);
         }
       });
     }
@@ -539,21 +560,44 @@ export class Scene {
     // Remove from game objects map
     this.gameObjects.delete(gameObjectId);
 
-    console.log(`Removed game object: ${gameObjectId}`);
+    console.log(`Destroyed game object: ${gameObjectId}`);
     return true;
   }
 
-  // Clear all blocks from scene
+  // Clear/unload current scene (for scene switching)
   clear() {
-    // Remove all blocks from Three.js scene
+    // Call onDestroy for all scripts before cleanup
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (gameObject.scriptInstance && gameObject.scriptInstance.onDestroy) {
+        try {
+          gameObject.scriptInstance.onDestroy(gameObject, this);
+        } catch (error) {
+          console.error(`Error in onDestroy for ${id}:`, error);
+        }
+      }
+    }
+
+    // Remove all blocks from Three.js scene and dispose geometry/materials
     this.blocks.forEach(block => {
       this.threeScene.remove(block);
+      // Dispose Three.js resources to prevent memory leaks
+      if (block.geometry) block.geometry.dispose();
+      if (block.material) {
+        if (Array.isArray(block.material)) {
+          block.material.forEach(mat => mat.dispose());
+        } else {
+          block.material.dispose();
+        }
+      }
     });
 
+    // Clear all collections
     this.blocks = [];
     this.gameObjects.clear();
     this.metadata = {};
     this.grid.cells.clear();
+
+    console.log('Scene cleared');
   }
 
   // Export scene to JSON format
@@ -593,6 +637,43 @@ export class Scene {
   // Get all game object IDs
   getGameObjectIds() {
     return Array.from(this.gameObjects.keys());
+  }
+
+  // Find game object by name (returns first match)
+  findGameObjectByName(name) {
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (gameObject.name === name) {
+        return gameObject;
+      }
+    }
+    return null;
+  }
+
+  // Find all game objects by name (returns array)
+  findGameObjectsByName(name) {
+    const results = [];
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (gameObject.name === name) {
+        results.push(gameObject);
+      }
+    }
+    return results;
+  }
+
+  // Find all game objects matching a predicate function
+  findGameObjects(predicate) {
+    const results = [];
+    for (const [id, gameObject] of this.gameObjects.entries()) {
+      if (predicate(gameObject)) {
+        results.push(gameObject);
+      }
+    }
+    return results;
+  }
+
+  // Get all game objects as an array
+  getAllGameObjects() {
+    return Array.from(this.gameObjects.values());
   }
 
   // Calculate grid bounds in world coordinates

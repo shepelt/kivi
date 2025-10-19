@@ -347,14 +347,14 @@ await scene.loadFromURL('/scenes/default.json');
 const scene = await Scene.fromURL('/scenes/default.json');
 ```
 
-**Add game objects at runtime:**
+**Instantiate game objects at runtime:**
 
 Useful for spawning objects during gameplay or creating multiple instances of objects with the same script:
 
 ```javascript
 // Spawn multiple enemies using the same script
 for (let i = 0; i < 5; i++) {
-  await scene.addGameObject({
+  await scene.instantiate({
     id: `enemy_${i}`,
     name: "enemy",
     script: "scripts/enemy.js",  // Reuse existing script
@@ -366,7 +366,7 @@ for (let i = 0; i < 5; i++) {
 
 // Spawn a projectile during gameplay (from within a script)
 const bulletId = `bullet_${Date.now()}`;
-await scene.addGameObject({
+await scene.instantiate({
   id: bulletId,
   script: "scripts/bullet.js",
   blocks: [
@@ -374,8 +374,8 @@ await scene.addGameObject({
   ]
 });
 
-// Remove a game object (bullet hit something, enemy died, etc.)
-scene.removeGameObject(bulletId);
+// Destroy a game object (bullet hit something, enemy died, etc.)
+scene.destroy(bulletId);
 
 // Generate procedural terrain (no script needed)
 const blocks = [];
@@ -385,7 +385,7 @@ for (let x = 0; x < 10; x++) {
   }
 }
 
-await scene.addGameObject({
+await scene.instantiate({
   id: "platform_1",
   name: "ground",
   blocks: blocks
@@ -402,7 +402,7 @@ KIVI is designed to be AI-friendly:
 4. **Automatic systems** - Physics and collision handled automatically
 5. **Simple scripts** - Plain JavaScript objects with lifecycle hooks
 6. **Grid-based** - Integer coordinates make positioning predictable
-7. **Runtime API** - Use `scene.addGameObject()` to create objects programmatically
+7. **Runtime API** - Use `scene.instantiate()` to create objects programmatically
 
 ## License
 

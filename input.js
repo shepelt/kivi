@@ -9,7 +9,8 @@ class InputManager {
       x: 0,
       y: 0,
       clicked: false,
-      lastClickTime: 0
+      lastClickTime: 0,
+      button: 0 // 0 = left, 1 = middle, 2 = right
     };
 
     // Set up listeners only once
@@ -29,11 +30,17 @@ class InputManager {
         this.mouse.y = e.clientY;
       });
 
-      window.addEventListener('click', (e) => {
+      window.addEventListener('mousedown', (e) => {
         this.mouse.x = e.clientX;
         this.mouse.y = e.clientY;
         this.mouse.clicked = true;
+        this.mouse.button = e.button;
         this.mouse.lastClickTime = performance.now();
+      });
+
+      // Prevent context menu on right-click
+      window.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
       });
 
       // Touch support
@@ -79,6 +86,11 @@ class InputManager {
   // Get mouse/touch position
   getPointerPosition() {
     return { x: this.mouse.x, y: this.mouse.y };
+  }
+
+  // Get last clicked mouse button (0 = left, 1 = middle, 2 = right)
+  getClickButton() {
+    return this.mouse.button;
   }
 
   // Check if there was a click this frame (call clearClick() after processing)

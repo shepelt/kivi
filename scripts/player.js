@@ -43,6 +43,41 @@ export default {
       gameObject.physics.setVelocity('y', gameObject.jumpForce);
       gameObject.isGrounded = false; // No longer grounded after jump
     }
+
+    // Scene switching test: Press '1' for default, '2' for testscene1
+    if (scene.input.isKeyDown('1')) {
+      scene.switchScene('/scenes/default.json');
+    } else if (scene.input.isKeyDown('2')) {
+      scene.switchScene('/scenes/testscene1.json');
+    }
+
+    // Click to spawn/remove blocks
+    const hit = scene.checkClick();
+    if (hit) {
+      const clickButton = scene.input.getClickButton();
+
+      if (clickButton === 2 && hit.gameObject && hit.gameObject.tag === 'spawned') {
+        // Right-click on spawned block: destroy it
+        scene.destroy(hit.gameObject.id);
+      } else if (clickButton === 0) {
+        // Left-click: instantiate new block
+        const spawnId = `spawned_block_${Date.now()}`;
+        scene.instantiate({
+          id: spawnId,
+          name: 'spawned_block',
+          tag: 'spawned',
+          blocks: [
+            {
+              type: 'cube',
+              x: hit.gridPosition.gridX,
+              y: hit.gridPosition.gridY + 1,
+              z: hit.gridPosition.gridZ,
+              color: 0xFFFF00
+            }
+          ]
+        });
+      }
+    }
   },
 
   // Called after physics and collision (both handled automatically by Scene)

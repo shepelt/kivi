@@ -7,6 +7,7 @@
 
 - TASK-1: basic rendering, scene, and asset system
 - TASK-2: physics and scripting system
+- TASK-3: game object management from script
 
 ## In Progress
 

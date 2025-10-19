@@ -393,6 +393,8 @@ export class Scene {
         if (gameObject.blocks && Array.isArray(gameObject.blocks)) {
           const gameObjectData = this.gameObjects.get(gameObject.id);
 
+          // First pass: create all blocks and collect positions
+          const blockPositions = [];
           gameObject.blocks.forEach((blockData, index) => {
             // Dynamic objects (with scripts) shouldn't be tracked in grid for collision
             const trackInGrid = !gameObject.script;
@@ -401,25 +403,50 @@ export class Scene {
               // Link block to game object
               block.userData.gameObjectId = gameObject.id;
               gameObjectData.blocks.push(block);
-
-              // Set initial position from first block (becomes the "anchor" position)
-              if (!gameObjectData.position) {
-                gameObjectData.position = {
-                  x: block.position.x,
-                  y: block.position.y,
-                  z: block.position.z
-                };
-                console.log(`Set position for ${gameObject.id}:`, gameObjectData.position);
-              }
-
-              // Store offset from anchor position for multi-block game objects
-              block.userData.offset = {
-                x: block.position.x - gameObjectData.position.x,
-                y: block.position.y - gameObjectData.position.y,
-                z: block.position.z - gameObjectData.position.z
-              };
+              blockPositions.push({
+                x: block.position.x,
+                y: block.position.y,
+                z: block.position.z
+              });
             }
           });
+
+          // Calculate geometric center of all blocks
+          if (blockPositions.length > 0) {
+            const center = {
+              x: blockPositions.reduce((sum, pos) => sum + pos.x, 0) / blockPositions.length,
+              y: blockPositions.reduce((sum, pos) => sum + pos.y, 0) / blockPositions.length,
+              z: blockPositions.reduce((sum, pos) => sum + pos.z, 0) / blockPositions.length
+            };
+
+            gameObjectData.position = center;
+            console.log(`Set position for ${gameObject.id} (center of ${blockPositions.length} blocks):`, center);
+
+            // Calculate bounding box (assumes each block is 1x1x1)
+            const minX = Math.min(...blockPositions.map(p => p.x));
+            const maxX = Math.max(...blockPositions.map(p => p.x));
+            const minY = Math.min(...blockPositions.map(p => p.y));
+            const maxY = Math.max(...blockPositions.map(p => p.y));
+            const minZ = Math.min(...blockPositions.map(p => p.z));
+            const maxZ = Math.max(...blockPositions.map(p => p.z));
+
+            // Bounding box size (each block is 1x1x1, so we add 1 to get full extent)
+            gameObjectData.bounds = {
+              x: maxX - minX + 1,
+              y: maxY - minY + 1,
+              z: maxZ - minZ + 1
+            };
+            console.log(`  Bounding box for ${gameObject.id}:`, gameObjectData.bounds);
+
+            // Second pass: store offsets from center for each block
+            gameObjectData.blocks.forEach((block, index) => {
+              block.userData.offset = {
+                x: blockPositions[index].x - center.x,
+                y: blockPositions[index].y - center.y,
+                z: blockPositions[index].z - center.z
+              };
+            });
+          }
         }
       });
     } else if (sceneData.blocks && Array.isArray(sceneData.blocks)) {

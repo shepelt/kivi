@@ -137,6 +137,41 @@ export function resolveCollision(scene, position, lastPosition, collider, exclud
   return hadCollision;
 }
 
+// Check AABB collision between two game objects
+// Returns { colliding: bool, penetration: {x, y, z} }
+export function checkGameObjectCollision(obj1, obj2) {
+  // Ensure both objects have position and bounds
+  if (!obj1.position || !obj2.position) {
+    return { colliding: false, penetration: { x: 0, y: 0, z: 0 } };
+  }
+
+  // Get bounds - use bounds for multi-block objects, collider.size for physics objects, or default size
+  const size1 = obj1.bounds || (obj1.collider && obj1.collider.size) || obj1.size || { x: 1, y: 1, z: 1 };
+  const size2 = obj2.bounds || (obj2.collider && obj2.collider.size) || obj2.size || { x: 1, y: 1, z: 1 };
+
+  // Calculate distances between centers
+  const dx = Math.abs(obj1.position.x - obj2.position.x);
+  const dy = Math.abs(obj1.position.y - obj2.position.y);
+  const dz = Math.abs(obj1.position.z - obj2.position.z);
+
+  // Calculate collision thresholds (half-sizes added together)
+  const colliderX = (size1.x + size2.x) / 2;
+  const colliderY = (size1.y + size2.y) / 2;
+  const colliderZ = (size1.z + size2.z) / 2;
+
+  // Check if colliding on all axes
+  const colliding = dx < colliderX && dy < colliderY && dz < colliderZ;
+
+  // Calculate penetration depth on each axis
+  const penetration = {
+    x: colliderX - dx,
+    y: colliderY - dy,
+    z: colliderZ - dz
+  };
+
+  return { colliding, penetration };
+}
+
 // Simple AABB (Axis-Aligned Bounding Box) collider
 export class BoxCollider {
   constructor(size = { x: 0.8, y: 0.8, z: 0.8 }) {

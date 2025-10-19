@@ -23,9 +23,9 @@
       "name": "paddle",
       "script": "scripts/paddle.js",
       "blocks": [
-        { "type": "cube", "x": 2, "y": 0, "z": 10, "color": 16711680 },
-        { "type": "cube", "x": 2, "y": 0, "z": 9, "color": 16711680 },
-        { "type": "cube", "x": 2, "y": 0, "z": 11, "color": 16711680 }
+        { "type": "cube", "x": 10, "y": 0, "z": 18, "color": 16711680 },
+        { "type": "cube", "x": 9, "y": 0, "z": 18, "color": 16711680 },
+        { "type": "cube", "x": 11, "y": 0, "z": 18, "color": 16711680 }
       ]
     },
     {
@@ -34,6 +34,46 @@
       "script": "scripts/ball.js",
       "blocks": [
         { "type": "sphere", "x": 10, "y": 0, "z": 10, "color": 16777215 }
+      ]
+    },
+    {
+      "id": "brick_1",
+      "name": "brick",
+      "tag": "breakable",
+      "blocks": [
+        { "type": "cube", "x": 5, "y": 0, "z": 2, "color": 16711680 },
+        { "type": "cube", "x": 4, "y": 0, "z": 2, "color": 16711680 },
+        { "type": "cube", "x": 6, "y": 0, "z": 2, "color": 16711680 }
+      ]
+    },
+    {
+      "id": "brick_2",
+      "name": "brick",
+      "tag": "breakable",
+      "blocks": [
+        { "type": "cube", "x": 8, "y": 0, "z": 2, "color": 65280 },
+        { "type": "cube", "x": 7, "y": 0, "z": 2, "color": 65280 },
+        { "type": "cube", "x": 9, "y": 0, "z": 2, "color": 65280 }
+      ]
+    },
+    {
+      "id": "brick_3",
+      "name": "brick",
+      "tag": "breakable",
+      "blocks": [
+        { "type": "cube", "x": 11, "y": 0, "z": 2, "color": 255 },
+        { "type": "cube", "x": 10, "y": 0, "z": 2, "color": 255 },
+        { "type": "cube", "x": 12, "y": 0, "z": 2, "color": 255 }
+      ]
+    },
+    {
+      "id": "brick_4",
+      "name": "brick",
+      "tag": "breakable",
+      "blocks": [
+        { "type": "cube", "x": 14, "y": 0, "z": 2, "color": 16776960 },
+        { "type": "cube", "x": 13, "y": 0, "z": 2, "color": 16776960 },
+        { "type": "cube", "x": 15, "y": 0, "z": 2, "color": 16776960 }
       ]
     }
   ]

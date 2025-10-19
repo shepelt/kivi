@@ -14,11 +14,11 @@ export default {
       maxFallSpeed: 0
     });
 
-    // Set up collider (match visual size: 3 blocks tall in Z direction)
+    // Set up collider (match visual size: 3 blocks wide in X direction)
     gameObject.collider = new scene.collision.BoxCollider({
-      x: 0.5,
+      x: 3.0,  // 3 blocks wide (covers x: 9, 10, 11)
       y: 2.0,
-      z: 3.0  // 3 blocks tall (covers z: 9, 10, 11)
+      z: 0.5
     });
 
     // Determine which keys to use based on paddle side
@@ -29,46 +29,46 @@ export default {
     // Safety check: ensure position exists
     if (!gameObject.position) return;
 
-    // Handle vertical movement only (Z axis in our game)
-    let moveZ = 0;
+    // Handle horizontal movement only (X axis in our game)
+    let moveX = 0;
 
     if (gameObject.isLeftPaddle) {
-      // Left paddle: W/S keys
-      if (scene.input.isKeyDown('w')) moveZ -= 1;
-      if (scene.input.isKeyDown('s')) moveZ += 1;
+      // Left paddle: A/D keys
+      if (scene.input.isKeyDown('a')) moveX -= 1;
+      if (scene.input.isKeyDown('d')) moveX += 1;
     } else {
       // Right paddle: Arrow keys
-      if (scene.input.isKeyDown('arrowup')) moveZ -= 1;
-      if (scene.input.isKeyDown('arrowdown')) moveZ += 1;
+      if (scene.input.isKeyDown('arrowleft')) moveX -= 1;
+      if (scene.input.isKeyDown('arrowright')) moveX += 1;
     }
 
-    // Apply movement force (only on Z axis)
-    if (moveZ !== 0) {
-      gameObject.physics.velocity.z += moveZ * gameObject.physics.acceleration * delta;
+    // Apply movement force (only on X axis)
+    if (moveX !== 0) {
+      gameObject.physics.velocity.x += moveX * gameObject.physics.acceleration * delta;
     } else {
       // Apply friction
       gameObject.physics.applyFriction(delta);
     }
 
     // Clamp speed
-    const speed = Math.abs(gameObject.physics.velocity.z);
+    const speed = Math.abs(gameObject.physics.velocity.x);
     if (speed > gameObject.physics.maxSpeed) {
-      gameObject.physics.velocity.z = (gameObject.physics.velocity.z / speed) * gameObject.physics.maxSpeed;
+      gameObject.physics.velocity.x = (gameObject.physics.velocity.x / speed) * gameObject.physics.maxSpeed;
     }
 
-    // Update position (Z only)
-    gameObject.position.z += gameObject.physics.velocity.z * delta;
+    // Update position (X only)
+    gameObject.position.x += gameObject.physics.velocity.x * delta;
 
     // Clamp to boundaries (prevent going out of bounds)
     // Use grid size to calculate boundaries manually for Pong
     const gridSize = scene.grid.size;
     const centerOffset = scene.grid.centerOffset;
-    const halfHeight = gameObject.collider.size.z / 2;
+    const halfWidth = gameObject.collider.size.x / 2;
 
     // Calculate world bounds from grid
-    const minZ = -centerOffset - 0.5 + halfHeight;
-    const maxZ = gridSize - centerOffset - 0.5 - halfHeight;
+    const minX = -centerOffset - 0.5 + halfWidth;
+    const maxX = gridSize - centerOffset - 0.5 - halfWidth;
 
-    gameObject.position.z = Math.max(minZ, Math.min(maxZ, gameObject.position.z));
+    gameObject.position.x = Math.max(minX, Math.min(maxX, gameObject.position.x));
   }
 };

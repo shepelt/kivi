@@ -1,6 +1,8 @@
 // Ball script for Pong game
 // Bounces off paddles and walls, resets on goals
 
+import { checkGameObjectCollision } from '../collision.js';
+
 export default {
   onInit(gameObject, scene) {
     console.log('Ball initialized:', gameObject.id);
@@ -54,36 +56,80 @@ export default {
     // Check paddle collisions
     const paddles = scene.findGameObjectsByName('paddle');
     for (const paddle of paddles) {
-      if (!paddle.position || !paddle.collider) continue;
+      const collision = checkGameObjectCollision(gameObject, paddle);
 
-      // Simple AABB collision check
-      const dx = Math.abs(gameObject.position.x - paddle.position.x);
-      const dz = Math.abs(gameObject.position.z - paddle.position.z);
-
-      const colliderX = (gameObject.size.x + paddle.collider.size.x) / 2;
-      const colliderZ = (gameObject.size.z + paddle.collider.size.z) / 2;
-
-      if (dx < colliderX && dz < colliderZ) {
+      if (collision.colliding) {
         // Collision detected!
 
-        // Reverse velocity
-        gameObject.velocity.x *= -1.05; // Bounce and speed up slightly
+        // Reverse Z velocity (ball bounces up/down off horizontal paddle)
+        gameObject.velocity.z *= -1.05; // Bounce and speed up slightly
 
-        // Add spin based on where it hit the paddle
-        const hitOffset = (gameObject.position.z - paddle.position.z) / paddle.collider.size.z;
-        gameObject.velocity.z += hitOffset * 2;
+        // Add spin based on where it hit the paddle (horizontally)
+        const paddleSize = paddle.collider ? paddle.collider.size : paddle.bounds;
+        const hitOffset = (gameObject.position.x - paddle.position.x) / paddleSize.x;
+        gameObject.velocity.x += hitOffset * 2;
 
-        // Push ball away from paddle to prevent overlap
-        const relativeX = gameObject.position.x - paddle.position.x;
-        if (relativeX < 0) {
-          // Ball is on left side of paddle, push it to the left edge
-          gameObject.position.x = paddle.position.x - colliderX;
+        // Push ball away from paddle to prevent overlap (in Z direction)
+        const size1 = gameObject.size || { x: 1, y: 1, z: 1 };
+        const size2 = paddleSize || { x: 1, y: 1, z: 1 };
+        const colliderZ = (size1.z + size2.z) / 2;
+
+        const relativeZ = gameObject.position.z - paddle.position.z;
+        if (relativeZ < 0) {
+          // Ball is on top side of paddle, push it up
+          gameObject.position.z = paddle.position.z - colliderZ;
         } else {
-          // Ball is on right side of paddle, push it to the right edge
-          gameObject.position.x = paddle.position.x + colliderX;
+          // Ball is on bottom side of paddle, push it down
+          gameObject.position.z = paddle.position.z + colliderZ;
         }
 
         console.log('Ball hit paddle!');
+      }
+    }
+
+    // Check brick collisions (Arkanoid-style breakable blocks)
+    const bricks = scene.findGameObjects(obj => obj.tag === 'breakable');
+    for (const brick of bricks) {
+      const collision = checkGameObjectCollision(gameObject, brick);
+
+      if (collision.colliding) {
+        // Collision detected! Destroy brick
+        console.log('Ball hit brick:', brick.id);
+        scene.destroy(brick.id);
+
+        // Determine which side was hit by comparing penetration depth
+        // Bounce based on which side had less penetration (that's the side that was hit)
+        if (collision.penetration.x < collision.penetration.z) {
+          // Hit left or right side, reverse X velocity
+          gameObject.velocity.x *= -1;
+
+          const size1 = gameObject.size || { x: 1, y: 1, z: 1 };
+          const size2 = brick.bounds || { x: 1, y: 1, z: 1 };
+          const colliderX = (size1.x + size2.x) / 2;
+
+          const relativeX = gameObject.position.x - brick.position.x;
+          if (relativeX < 0) {
+            gameObject.position.x = brick.position.x - colliderX;
+          } else {
+            gameObject.position.x = brick.position.x + colliderX;
+          }
+        } else {
+          // Hit top or bottom side, reverse Z velocity
+          gameObject.velocity.z *= -1;
+
+          const size1 = gameObject.size || { x: 1, y: 1, z: 1 };
+          const size2 = brick.bounds || { x: 1, y: 1, z: 1 };
+          const colliderZ = (size1.z + size2.z) / 2;
+
+          const relativeZ = gameObject.position.z - brick.position.z;
+          if (relativeZ < 0) {
+            gameObject.position.z = brick.position.z - colliderZ;
+          } else {
+            gameObject.position.z = brick.position.z + colliderZ;
+          }
+        }
+
+        break; // Only handle one brick collision per frame
       }
     }
 
